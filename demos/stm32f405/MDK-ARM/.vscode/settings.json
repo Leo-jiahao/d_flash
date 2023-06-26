@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "stm32f405_demo1_can.h": "c",
+        "stm32f4xx_hal.h": "c",
+        "can.h": "c",
+        "stm32f405_demo1_flash.h": "c",
+        "stddef.h": "c",
+        "main.h": "c",
+        "gpio.h": "c"
+    }
+}
