@@ -6,6 +6,7 @@
         "stm32f405_demo1_flash.h": "c",
         "stddef.h": "c",
         "main.h": "c",
-        "gpio.h": "c"
+        "gpio.h": "c",
+        "d_flash.h": "c"
     }
 }

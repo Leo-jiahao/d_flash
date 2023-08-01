@@ -97,7 +97,7 @@ int main(void)
   if(df_init(&df_state) == DF_F_OK){
     DEMO_LOG("df_init succeeded. remain space:%ulByte, %ulKB\n",df_state,df_state>>12);
   }else{
-    DEMO_LOG("df_init failed. remain space:%ulByte, %ulKB",df_state, df_state>>12);
+    DEMO_LOG("df_init failed. remain space:%ulByte, %ulKB\n",df_state, df_state>>12);
     Error_Handler();
   }
   const char *df_test_key = "df_test_key";
@@ -107,7 +107,7 @@ int main(void)
     DEMO_LOG("df_write new value:%x\n",++df_test_value);
     
   }else{
-    DEMO_LOG("df_read failed. key:%s",df_test_key);
+    DEMO_LOG("df_read failed. key:%s\n",df_test_key);
     df_test_value = 0x12345678U;
     DEMO_LOG("df_write first. key:%s, value:%x\n",df_test_key,df_test_value);
 
@@ -116,7 +116,7 @@ int main(void)
   if(df_write(df_test_key,&df_test_value, sizeof(uint32_t), &df_state) == DF_F_OK){
     DEMO_LOG("df_write succeeded. remain space:%ulByte, %ulKB\n",df_state, df_state>>12);
   }else{
-    DEMO_LOG("df_write failed. remain space:%ulByte, %ulKB",df_state, df_state>>12);
+    DEMO_LOG("df_write failed. remain space:%ulByte, %ulKB\n",df_state, df_state>>12);
   }
   /* USER CODE END 2 */
 
