@@ -128,15 +128,45 @@ typedef struct
 /**
  * @brief 连续读flash
  * 
- * @param address 4Byte对齐
+ * @param address 
  * @param buff u32
- * @param length 4Byte对齐
+ * @param length Byte num
  */
-static void DF_ReadFlashFunction(uint32_t address, uint32_t *dest,uint16_t length)
+static inline void DF_ReadFlashFunction(uint32_t address, void *dest,uint16_t length)
 {
-	for(int i = 0; i < length; i++)
+	uint16_t word_num = length >> 2;
+	uint16_t byte_remain = length & (0x0003U);
+	uint32_t tmp = 0;
+	uint32_t *p_u32 = dest;
+	for(int i = 0; i < word_num; i++)
 	{
-		dest[i] = FLASH_READ_U32(address + i * 4);   //read data
+		p_u32[i] = FLASH_READ_U32(address + i * 4);   //read data
+	}
+	if(byte_remain){
+		tmp = FLASH_READ_U32(address + word_num * 4);   //read data
+		memcpy((void *)((uint32_t)dest + word_num * 4), &tmp,byte_remain);
+	}
+}
+/**
+ * @brief 连续写
+ * a
+ * @param address 地址
+ * @param src 
+ * @param length byte length
+ */
+static inline void DF_WriteFlashFunction(uint32_t address, void *src,uint16_t length)
+{
+	uint16_t word_num = length >> 2;
+	uint16_t byte_remain = length & (0x0003U);
+	uint32_t tmp = 0;
+	uint32_t *p_u32 = src;
+
+	while(FLASH_WRITE(address, p_u32, word_num) != true);
+	
+	if(byte_remain){
+		memcpy(&tmp, (void *)((uint32_t)src + word_num * 4), byte_remain);
+		
+		while(FLASH_WRITE(address + word_num * 4, &tmp, 1) != true);
 	}
 }
 /**
@@ -145,7 +175,7 @@ static void DF_ReadFlashFunction(uint32_t address, uint32_t *dest,uint16_t lengt
  * @param str 输入的字符串
  * @return uint64_t 输出的hash值
  */
-static uint32_t BKDHash(const char *str)
+static inline uint32_t BKDHash(const char *str)
 {
 	uint32_t ret;
 	MurmurHash3_x86_32(str, strlen(str), 1204, (void *)&ret);
@@ -169,7 +199,7 @@ static int DF_getIndexFromHash(const char *str, uint16_t item_num, uint8_t iswst
 	uint32_t tabaddr = fctl.DF_Flash_StartAddr + sizeof(DF_FlashHead_TypeDef);
 	DF_HashTHN_data h_n;
 	do{
-		DF_ReadFlashFunction(tabaddr+ ret*sizeof(DF_HashTHN_data),(uint32_t *)&h_n,sizeof(h_n)>>2);
+		DF_ReadFlashFunction(tabaddr+ ret*sizeof(DF_HashTHN_data),&h_n,sizeof(h_n));
 		if(hash == h_n.DF_HashNode_key)
 		{
 			return ret;
@@ -191,8 +221,9 @@ static int DF_getIndexFromHash(const char *str, uint16_t item_num, uint8_t iswst
 	}else{
 		ret = ret - 1;
 	}
-	if(iswstr)
-	while(FLASH_WRITE(sizeof(DF_FlashHead_TypeDef) + fctl.DF_Flash_StartAddr + ret*sizeof(DF_HashTHN_data)+8,(uint32_t *)&hash,1) != true);
+	if(iswstr){
+		DF_WriteFlashFunction(sizeof(DF_FlashHead_TypeDef) + fctl.DF_Flash_StartAddr + ret*sizeof(DF_HashTHN_data)+8, &hash,4);
+	}
 
 	return ret;
 }
@@ -202,7 +233,7 @@ static int DF_getIndexFromHash(const char *str, uint16_t item_num, uint8_t iswst
  * @param p_g 
  * @return int Err -1(gnode偏移地址超出边界)
  */
-static int DF_FindEndGNode(DF_HashNode_Guard *p_g)
+static inline int DF_FindEndGNode(DF_HashNode_Guard *p_g)
 {
 	
 	if(p_g->DF_free_addr >= fctl.DF_Flash_AllSize)return FErr;
@@ -225,11 +256,11 @@ static int DF_FindEndGNode(DF_HashNode_Guard *p_g)
  * @param h_i head index.条目数，如果是首节点，则用其找到首节点地址
  * @return int Err -1数据错误  -2:空间不足
  */
-static int DF_Write2Flash(char *src,uint32_t size,DF_DataNode *p_d,uint16_t h_i)
+static inline int DF_Write2Flash(void *src,uint32_t size,DF_DataNode *p_d,uint16_t h_i)
 {
 	uint32_t gnewaddr,dnewaddr;
 	DF_HashNode_Guard *p_g = (DF_HashNode_Guard *)&fctl.DF_Flash_Guard;
-	uint32_t len = size;
+	uint32_t len = ALIGN4B_SIZE(size);
 	if(src == NULL || p_d ==NULL)
 	{
 		return FErr;
@@ -241,21 +272,26 @@ static int DF_Write2Flash(char *src,uint32_t size,DF_DataNode *p_d,uint16_t h_i)
 	gnewaddr = p_g->DF_free_addr;
 	if(p_d->DF_addr <= fctl.DF_Flash_AllSize)		//中间节点地址
 	{
-		dnewaddr = p_d->DF_addr + p_d->DF_size;
+		dnewaddr = p_d->DF_addr + ALIGN4B_SIZE(p_d->DF_size);
 	}else if(p_d->DF_addr == 0xFFFFFFFF && p_d->DF_size == 0xFFFFFFFF)			//首节点地址
 	{
 		dnewaddr = h_i * sizeof(DF_HashTHN_data) + sizeof(DF_FlashHead_TypeDef);
 	}
-	
-	while(FLASH_WRITE(p_g->DF_free_addr + fctl.DF_Flash_StartAddr + sizeof(DF_HashNode_Guard),(uint32_t *)src,len>>2) != true);	//写数据
+	DF_WriteFlashFunction(p_g->DF_free_addr + fctl.DF_Flash_StartAddr + sizeof(DF_HashNode_Guard),src,size);	//写数据
+
 	p_d->DF_addr = p_g->DF_free_addr + sizeof(DF_HashNode_Guard);												//更新传入的数据节点，
 	p_d->DF_size = size;
-	fctl.DF_Flash_DNArray[h_i].DF_addr = p_d->DF_addr;											//更新控制结构体中的数据节点
+	
+	fctl.DF_Flash_DNArray[h_i].DF_addr = p_d->DF_addr;															//更新控制结构体中的数据节点
 	fctl.DF_Flash_DNArray[h_i].DF_size = p_d->DF_size;
-	while(FLASH_WRITE(dnewaddr+fctl.DF_Flash_StartAddr,(uint32_t *)p_d,sizeof(DF_DataNode)>>2) != true);							//更新flash中的data node
+	
+	DF_WriteFlashFunction(dnewaddr+fctl.DF_Flash_StartAddr,p_d,sizeof(DF_DataNode));							//更新flash中的data node
+						
 	p_g->DF_remain_size = p_g->DF_remain_size - (len + sizeof(DF_HashNode_Guard)+sizeof(DF_DataNode));			//更新ctl中的哨兵结点
 	p_g->DF_free_addr = p_g->DF_free_addr+ len + sizeof(DF_HashNode_Guard)+sizeof(DF_DataNode);
-	while(FLASH_WRITE(gnewaddr+fctl.DF_Flash_StartAddr,(uint32_t *)p_g,sizeof(DF_HashNode_Guard)>>2) != true);					//更新flash中guard_node
+
+	DF_WriteFlashFunction(gnewaddr+fctl.DF_Flash_StartAddr, p_g, sizeof(DF_HashNode_Guard));					//更新flash中guard_node
+					
 	return FSuc;
 }
 /**
@@ -265,7 +301,7 @@ static int DF_Write2Flash(char *src,uint32_t size,DF_DataNode *p_d,uint16_t h_i)
  * @param p_d 得到最后的合法节点，如果最后节点就是头节点则赋值 0xFFFFFFFF
  * @return int Err -1
  */
-static int DF_FindEndDNode(DF_HashTHN_data *p_h,DF_DataNode *p_d)
+static inline int DF_FindEndDNode(DF_HashTHN_data *p_h,DF_DataNode *p_d)
 {
 	if(p_h->DF_HashNode_addr == 0xFFFFFFFF && p_h->DF_HashNode_size == 0xFFFFFFFF)
 	{
@@ -273,15 +309,15 @@ static int DF_FindEndDNode(DF_HashTHN_data *p_h,DF_DataNode *p_d)
 		p_d->DF_size = 0xFFFFFFFF;
 		return FSuc;
 	}
-	p_d->DF_addr = p_h->DF_HashNode_addr+p_h->DF_HashNode_size;
+	p_d->DF_addr = p_h->DF_HashNode_addr + ALIGN4B_SIZE(p_h->DF_HashNode_size);
 	p_d->DF_size = p_h->DF_HashNode_size;
 	while (FLASH_READ_U32(p_d->DF_addr + fctl.DF_Flash_StartAddr) !=0xFFFFFFFF)
 	{
 		if(p_d->DF_addr >= fctl.DF_Flash_AllSize)return FErr;
-		p_d->DF_size = FLASH_READ_U32(p_d->DF_addr+4+fctl.DF_Flash_StartAddr);
-		p_d->DF_addr = FLASH_READ_U32(p_d->DF_addr+fctl.DF_Flash_StartAddr) + p_d->DF_size;
+		p_d->DF_size = FLASH_READ_U32(p_d->DF_addr + fctl.DF_Flash_StartAddr + 4);
+		p_d->DF_addr = FLASH_READ_U32(p_d->DF_addr + fctl.DF_Flash_StartAddr) + ALIGN4B_SIZE(p_d->DF_size);
 	}
-	p_d->DF_addr-=p_d->DF_size;
+	p_d->DF_addr -= ALIGN4B_SIZE(p_d->DF_size);
 	return FSuc;
 }
 /**
@@ -313,17 +349,20 @@ static int DF_Flash_transfer(uint32_t swapaddr,uint32_t swapsize,uint32_t swapco
 			}
 			thn.DF_HashNode_addr = dataddr;
 			thn.DF_HashNode_size = fctl.DF_Flash_DNArray[i].DF_size;
-			memcpy(
-				(void *)&thn.DF_HashNode_key,
-				(void *)(fctl.DF_Flash_StartAddr + sizeof(DF_FlashHead_TypeDef) + i * sizeof(DF_HashTHN_data) + sizeof(uint32_t)*2),
-				sizeof(thn.DF_HashNode_key));
+
+			DF_ReadFlashFunction(fctl.DF_Flash_StartAddr + sizeof(DF_FlashHead_TypeDef) + i * sizeof(DF_HashTHN_data) + sizeof(uint32_t)*2,
+				&thn.DF_HashNode_key,sizeof(thn.DF_HashNode_key));
+
 			//3 写条目的头节点
-			while(FLASH_WRITE(swapaddr+i*sizeof(DF_HashTHN_data)+sizeof(DF_FlashHead_TypeDef),(void *)&thn,sizeof(thn)>>2) != true);
+			DF_WriteFlashFunction(swapaddr+i*sizeof(DF_HashTHN_data)+sizeof(DF_FlashHead_TypeDef),&thn,sizeof(thn));
+			
 			//4 写条目数据
-			while(FLASH_WRITE(swapaddr+dataddr, (void *)(fctl.DF_Flash_DNArray[i].DF_addr+fctl.DF_Flash_StartAddr),thn.DF_HashNode_size>>2) != true);
-	//5 更新fctl相关信息
+			DF_WriteFlashFunction(swapaddr+dataddr, (void *)(fctl.DF_Flash_DNArray[i].DF_addr+fctl.DF_Flash_StartAddr),thn.DF_HashNode_size);
+			
+
+			//5 更新fctl相关信息
 			fctl.DF_Flash_DNArray[i].DF_addr = thn.DF_HashNode_addr;
-			dataddr += sizeof(DF_DataNode)+thn.DF_HashNode_size;
+			dataddr += sizeof(DF_DataNode) + ALIGN4B_SIZE(thn.DF_HashNode_size);
 		}
 	}
 	fctl.DF_Flash_AllSize = swapsize;
@@ -333,7 +372,7 @@ static int DF_Flash_transfer(uint32_t swapaddr,uint32_t swapsize,uint32_t swapco
 	//6 最后写入头部信息
 	hn.DF_HashNode_Guard.DF_free_addr = dataddr;
 	hn.DF_HashNode_Guard.DF_remain_size = fctl.DF_Flash_Guard.DF_remain_size;
-	while(FLASH_WRITE(swapaddr,(uint32_t *)&hn,sizeof(hn)>>2) != true);
+	DF_WriteFlashFunction(swapaddr,&hn,sizeof(hn));
 	return 0;
 }
 /**
@@ -344,7 +383,7 @@ static int DF_Flash_transfer(uint32_t swapaddr,uint32_t swapsize,uint32_t swapco
  * @par Transfer_Err:state转存分区的大小，读写正常只是单独分区已满需要转存，并非故障类错误
  * @par D_NODE_ERR:严重错误，正常情况下不会发生
  */
-static DF_Code DF_FlashInitFunction(void *state)
+static inline DF_Code DF_FlashInitFunction(void *state)
 {
 	DF_HashTHN_data hn={0,};
 	DF_DataNode dn={0,};
@@ -354,8 +393,8 @@ static DF_Code DF_FlashInitFunction(void *state)
 	DF_HashNode_Guard *p_gnode = &head.DF_HashNode_Guard;
 	memset((void*)&fctl, 0, sizeof(DF_FlashCtl_TypeDef));
 
-	DF_ReadFlashFunction(FLASH_START_ADDR_1B,(uint32_t *)&flag1,sizeof(DF_HashNode_Flag)>>2);
-	DF_ReadFlashFunction(FLASH_START_ADDR_2B,(uint32_t *)&flag2,sizeof(DF_HashNode_Flag)>>2);
+	DF_ReadFlashFunction(FLASH_START_ADDR_1B,&flag1,sizeof(DF_HashNode_Flag));
+	DF_ReadFlashFunction(FLASH_START_ADDR_2B,&flag2,sizeof(DF_HashNode_Flag));
 	//1 定位到正在使用的分区
 	if(flag1.flag_A==0xA && flag2.flag_A==0xA)
 	{	
@@ -413,25 +452,25 @@ static DF_Code DF_FlashInitFunction(void *state)
 		head.item_num = ITEM_MAX_NUM;
 		head.item_size = sizeof(DF_HashTHN_data);
 		while( FLASH_ERASE_1B!= true);
-		while(
-			FLASH_WRITE(fctl.DF_Flash_StartAddr,
-			(void *)&head,
-			sizeof(head)>>2) != true);
+		while( FLASH_ERASE_2B!= true);
+
+		DF_WriteFlashFunction(fctl.DF_Flash_StartAddr, &head, sizeof(head));
+
 		fctl.DF_Flash_Guard.DF_remain_size = p_gnode->DF_remain_size;
 		fctl.DF_Flash_Guard.DF_free_addr = p_gnode->DF_free_addr;
 	}
 	else
 	{
 		//3 避免读时查找，提前定位数据节点
-		DF_ReadFlashFunction(fctl.DF_Flash_StartAddr,(uint32_t *)&head,sizeof(head)>>2);
+		DF_ReadFlashFunction(fctl.DF_Flash_StartAddr,&head,sizeof(head));
 
 		for (int i = 0; i < ITEM_MAX_NUM; i++)
 		{
 			//3.1 头节点
 			DF_ReadFlashFunction(
 				fctl.DF_Flash_StartAddr + sizeof(DF_FlashHead_TypeDef) + i * sizeof(DF_HashTHN_data),
-				(uint32_t *)&hn,
-				sizeof(DF_HashTHN_data)>>2);
+				&hn,
+				sizeof(DF_HashTHN_data));
 			//3.2 查找最新数据节点
 			if(hn.DF_HashNode_addr != 0xFFFFFFFF && hn.DF_HashNode_size != 0xFFFFFFFF)
 			{
@@ -482,6 +521,7 @@ static DF_Code DF_FlashInitFunction(void *state)
 	return DF_F_OK;
 }
 
+
 /**
  * @brief 写入条目及其内容，如果不存在则创建，存在则修改
  * 
@@ -493,7 +533,7 @@ static DF_Code DF_FlashInitFunction(void *state)
  * @par 其他 state为剩余空间大小
  * @par Write_ERR 参数错误时 state为NULL
  */
-static DF_Code DF_FlashInsertFunction(const char *key, void *src, uint32_t size, uint32_t *state)
+static inline DF_Code DF_FlashInsertFunction(const char *key, void *src, uint32_t size, uint32_t *state)
 {
 	//DF_HashTHN_data hn;
 	DF_DataNode dn;
@@ -532,7 +572,7 @@ static DF_Code DF_FlashInsertFunction(const char *key, void *src, uint32_t size,
  * @param size 
  * @return DF_Code 
  */
-static DF_Code DF_FlashReadItemFunction(const char *key, void *dest, uint32_t size)
+static inline DF_Code DF_FlashReadItemFunction(const char *key, void *dest, uint32_t size)
 {
 	int item_index;
 
@@ -547,7 +587,7 @@ static DF_Code DF_FlashReadItemFunction(const char *key, void *dest, uint32_t si
 		return Read_SizeErr;
 	}else
 	{
-		DF_ReadFlashFunction(fctl.DF_Flash_DNArray[item_index].DF_addr + fctl.DF_Flash_StartAddr, (uint32_t *)dest, size >>2);
+		DF_ReadFlashFunction(fctl.DF_Flash_DNArray[item_index].DF_addr + fctl.DF_Flash_StartAddr, dest, size);
 	}
 
 	return DF_F_OK;
@@ -579,18 +619,17 @@ DF_Code df_init(void *state)
 }
 
 /**
- * @brief size必须是4的整数倍，否则参数错误
+ * @brief 获取条目数据
  * 
- * @param key 
- * @param dest 
- * @param size 
+ * @param key 条目标签字符串
+ * @param dest 目的地址
+ * @param size 数据长度
  * @return DF_Code 
  */
 DF_Code df_read(const char *key, void *dest, uint32_t size)
 {
     #if ENABLE_D_FLASH == 1
-	if(size % 4 != 0)
-	return DataKey_SizeErr;
+
 	return DF_FlashReadItemFunction(key,dest,size);
     
 	#else
@@ -598,26 +637,21 @@ DF_Code df_read(const char *key, void *dest, uint32_t size)
 	#endif
 }
 /**
- * @brief size必须是4的整数倍，否则参数错误，写入条目及其内容，如果不存在则创建，存在则修改
+ * @brief 写入条目及其内容，如果不存在则创建，存在则修改
  * 
- * @param key 
- * @param src 
- * @param size 
- * @param state
+ * @param key 条目标签字符串
+ * @param src 数据源地址
+ * @param size 数据长度
+ * @param state 返回状态
  * @return DF_Code 
  * @par 其他 state为剩余空间大小
- * @par Write_ERR DataKey_SizeErr 参数错误时 state为NULL
+ * @par Write_ERR 参数错误时 state为NULL
  */
 DF_Code df_write(const char *key, void *src, uint32_t size,uint32_t *state)
 {
     #if ENABLE_D_FLASH == 1
 
-
-	if(size % 4 != 0)
-	return DataKey_SizeErr;
 	return DF_FlashInsertFunction(key,src,size,state);
-
-
 
     #else
     return DF_S_ERR;

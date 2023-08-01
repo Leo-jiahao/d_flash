@@ -67,7 +67,7 @@ typedef enum
 /**
  * @brief 
  * 
- * @param key 传入的key，字符串的长度，必须为4的整数倍，且不大于配置值：如"LH_MAXOF"
+ * @param key 传入的ke
  * @param dest 
  * @param size 最大1024字节
  * @return DF_Code 
@@ -77,7 +77,7 @@ DF_Code df_read(const char *key, void *dest, uint32_t size);
 /**
  * @brief 
  * 
- * @param key 传入的key，字符串的长度，必须为4的整数倍，且不大于配置值：如"LH_MAXOF"
+ * @param key 传入的key
  * @param src 
  * @param size 最大1024字节
  * @param state 
